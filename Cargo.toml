@@ -1,0 +1,12 @@
+[package]
+name = "yt-dlp-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.68"
+axum = "0.6.1"
+clap = { version = "4.0.29", features = ["derive"] }
+serde = { version = "1.0.151", features = ["derive"] }
+tokio = { version = "1", features = ["full"] }
+
