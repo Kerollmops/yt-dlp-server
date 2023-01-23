@@ -11,6 +11,9 @@ use tokio::process::Command;
 use tokio::task;
 use tracing::{debug, error, info, trace};
 
+/// Do a simple `--progress-template '%(progress)j'` to see the JSON and the possibilities.
+const PROGRAM_TEMPLATE: &str = "%(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
+
 /// The server that listens and downloads videos by using yt-dlp.
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -43,7 +46,8 @@ async fn download_url(
     task::spawn(async move {
         let result = Command::new("yt-dlp")
             .args(["--paths", &download_folder.display().to_string()])
-            .arg(&url)
+            .args(["-q", "--progress", "--newline", "--progress-template", PROGRAM_TEMPLATE])
+            .args(["--", &url])
             .status()
             .await;
 
