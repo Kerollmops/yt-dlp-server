@@ -1,18 +1,26 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::process::Stdio;
 
-use anyhow::bail;
+use anyhow::{bail, Context};
 use axum::extract::{Query, State};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
+use once_cell::sync::Lazy;
+use regex::{Captures, Regex};
 use serde::Deserialize;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::task;
 use tracing::{debug, error, info, trace};
 
 /// Do a simple `--progress-template '%(progress)j'` to see the JSON and the possibilities.
-const PROGRAM_TEMPLATE: &str = "%(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
+const PROGRESS_TEMPLATE: &str = "%(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
+/// The regex that parses the above progress template.
+static PROGRESS_REGEX: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?P<index>\d+)/(?P<count>\d+) (?P<eta>\d+) (?P<filename>.+)").unwrap()
+});
 
 /// The server that listens and downloads videos by using yt-dlp.
 #[derive(Parser, Debug)]
@@ -44,14 +52,26 @@ async fn download_url(
     trace!("Started downloading {url:?}...");
 
     task::spawn(async move {
-        let result = Command::new("yt-dlp")
+        let mut cmd = Command::new("yt-dlp")
             .args(["--paths", &download_folder.display().to_string()])
-            .args(["-q", "--progress", "--newline", "--progress-template", PROGRAM_TEMPLATE])
+            .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
             .args(["--", &url])
-            .status()
-            .await;
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
 
-        match result {
+        let stdout = cmd.stdout.as_mut().unwrap();
+        let stdout_reader = BufReader::new(stdout);
+        let mut stdout_lines = stdout_reader.lines();
+        while let Some(line) = stdout_lines.next_line().await.unwrap() {
+            if let Some(captures) = PROGRESS_REGEX.captures(&line) {
+                if let Ok(progress) = DownloadProgress::try_from(captures) {
+                    println!("{:?}", progress);
+                }
+            }
+        }
+
+        match cmd.wait().await {
             Ok(s) if !s.success() => error!("There is an issue downloading {url:?}, status: {s}"),
             Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
             _ => info!("Finished downloading {url:?}"),
@@ -80,4 +100,25 @@ async fn main() -> anyhow::Result<()> {
     axum::Server::bind(&listen).serve(app.into_make_service()).await?;
 
     Ok(())
+}
+
+#[derive(Debug)]
+struct DownloadProgress<'a> {
+    index: usize,
+    count: usize,
+    eta: usize,
+    filename: &'a str,
+}
+
+impl<'a> TryFrom<Captures<'a>> for DownloadProgress<'a> {
+    type Error = anyhow::Error;
+
+    fn try_from(cap: Captures<'a>) -> Result<DownloadProgress<'a>, Self::Error> {
+        Ok(DownloadProgress {
+            index: cap.name("index").context("missing `index`")?.as_str().parse()?,
+            count: cap.name("count").context("missing `count`")?.as_str().parse()?,
+            eta: cap.name("eta").context("missing `eta`")?.as_str().parse()?,
+            filename: cap.name("filename").context("missing `filename`")?.as_str(),
+        })
+    }
 }
