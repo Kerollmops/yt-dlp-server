@@ -1,19 +1,25 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::Arc;
 
 use anyhow::{bail, Context};
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
+use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex};
 use serde::Deserialize;
+use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::sync::broadcast;
 use tokio::task;
 use tracing::{debug, error, info, trace};
+use url::Url;
 
 /// Do a simple `--progress-template '%(progress)j'` to see the JSON and the possibilities.
 const PROGRESS_TEMPLATE: &str = "%(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
@@ -40,33 +46,70 @@ struct DownloadURL {
     url: String,
 }
 
-#[derive(Clone)]
 struct AppState {
     download_folder: PathBuf,
+    progress: broadcast::Sender<String>,
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
+    let Args { listen, download_folder } = Args::parse();
+    let app_state = Arc::new(AppState { download_folder, progress: broadcast::channel(100).0 });
+
+    match Command::new("yt-dlp").arg("--version").output().await {
+        Ok(output) => {
+            let version = String::from_utf8(output.stdout).unwrap();
+            let version = version.lines().next().unwrap();
+            debug!("Running the server with `yt-dlp` version {version}");
+        }
+        Err(e) => bail!("While running `yt-dlp --version`: {e}"),
+    };
+
+    let app = Router::new()
+        .route("/download", get(download_url))
+        .route("/", get(index))
+        .route("/websocket", get(websocket_handler))
+        .with_state(app_state);
+    debug!("Listening on {listen}...");
+    axum::Server::bind(&listen).serve(app.into_make_service()).await?;
+
+    Ok(())
 }
 
 async fn download_url(
-    State(AppState { download_folder }): State<AppState>,
+    State(state): State<Arc<AppState>>,
     Query(DownloadURL { url }): Query<DownloadURL>,
 ) {
     trace!("Started downloading {url:?}...");
+    let url = Url::parse(&url).unwrap();
 
     task::spawn(async move {
         let mut cmd = Command::new("yt-dlp")
-            .args(["--paths", &download_folder.display().to_string()])
+            .args(["--paths", &state.download_folder.display().to_string()])
             .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
-            .args(["--", &url])
+            .args(["--", url.as_str()])
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
 
+        let progress = &state.progress;
         let stdout = cmd.stdout.as_mut().unwrap();
         let stdout_reader = BufReader::new(stdout);
         let mut stdout_lines = stdout_reader.lines();
         while let Some(line) = stdout_lines.next_line().await.unwrap() {
             if let Some(captures) = PROGRESS_REGEX.captures(&line) {
-                if let Ok(progress) = DownloadProgress::try_from(captures) {
-                    println!("{:?}", progress);
+                if let Ok(prg) = DownloadProgress::try_from(captures) {
+                    info!("Progress: {:?}", prg);
+                    let content = json!({
+                        "filename": prg.filename,
+                        "percentage": (prg.index as f32) / (prg.count as f32),
+                        "eta": prg.eta,
+                    });
+                    if let Err(e) = progress.send(content.to_string()) {
+                        error!("Cannot send the download progress to the users: {e}");
+                    }
                 }
             }
         }
@@ -79,27 +122,29 @@ async fn download_url(
     });
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+async fn websocket_handler(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    ws.on_upgrade(|socket| websocket(socket, state))
+}
 
-    let Args { listen, download_folder } = Args::parse();
-    let app_state = AppState { download_folder };
-
-    match Command::new("yt-dlp").arg("--version").output().await {
-        Ok(output) => {
-            let version = String::from_utf8(output.stdout).unwrap();
-            let version = version.lines().next().unwrap();
-            debug!("Running the server with `yt-dlp` version {version}");
+// This function deals with a single websocket connection, i.e., a single
+// connected client / user, for which we will spawn two independent tasks (for
+// receiving / sending chat messages).
+async fn websocket(mut stream: WebSocket, state: Arc<AppState>) {
+    let mut rx = state.progress.subscribe();
+    while let Ok(msg) = rx.recv().await {
+        // In any websocket error, break loop.
+        if stream.send(Message::Text(msg)).await.is_err() {
+            break;
         }
-        Err(e) => bail!("While running `yt-dlp --version`: {e}"),
-    };
+    }
+}
 
-    let app = Router::new().route("/", get(download_url)).with_state(app_state);
-    debug!("Listening on {listen}...");
-    axum::Server::bind(&listen).serve(app.into_make_service()).await?;
-
-    Ok(())
+// Include utf-8 file at **compile** time.
+async fn index() -> Html<&'static str> {
+    Html(std::include_str!("../index.html"))
 }
 
 #[derive(Debug)]
