@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+   <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1">
+      <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📺</text></svg>">
+      <title>Yt-DLP server</title>
+      <link href="/bootstrap.min.css" rel="stylesheet">
+      <style>
+        .main-content {
+             max-width: 460px;
+             margin: 4rem auto;
+        }
+
+         .form-check-input-placeholder {
+            border-style: dashed;
+         }
+         .list-group-checkable .list-group-item {
+            cursor: pointer;
+         }
+         .list-group-item-check {
+             position: absolute;
+             clip: rect(0, 0, 0, 0);
+         }
+         .list-group-item-check[disabled] + .list-group-item,
+         .list-group-item-check:disabled + .list-group-item {
+             pointer-events: none;
+             filter: none;
+             opacity: .5;
+         }
+         .list-group-radio .list-group-item {
+             cursor: pointer;
+             border-radius: .5rem;
+         }
+         .list-group-radio .form-check-input {
+             z-index: 2;
+             margin-top: -.5em;
+         }
+         .list-group-radio .form-check-input[disabled] + .list-group-item,
+         .list-group-radio .form-check-input:disabled + .list-group-item {
+             pointer-events: none;
+             filter: none;
+             opacity: .5;
+         }
+      </style>
+   </head>
+
+   <body>
+    <div class="container main-content">
+        <h1>📺 Yt-DLP server</h1>
+        <span id="connection-status" class="badge text-bg-secondary">Not Connected</span>
+        <p class="mt-2">Keep track of the ongoing downloads running on the Yt-DLP server.</p>
+        <div id="downloads" class="list-group w-auto mt-2">
+            <!--  -->
+        </div>
+    </div>
+
+    <script>
+        window.addEventListener('load', () => {
+            const downloads = document.getElementById("downloads");
+            const connection_status = document.getElementById("connection-status");
+            const websocket = new WebSocket('ws://' + window.location.host + `/websocket`);
+
+            websocket.onopen = function() {
+                connection_status.classList = "badge text-bg-success"
+                connection_status.innerHTML = "Connected";
+            }
+
+            websocket.onclose = function() {
+                connection_status.classList = "badge text-bg-danger"
+                connection_status.innerHTML = "Disconnected";
+            }
+
+            websocket.onmessage = function(e) {
+                const { filename, url, percentage, eta } = JSON.parse(e.data);
+                const icons = ['🐒', '🦍', '🦧', '🐶', '🐕', '🦮', '🐕‍🦺', '🐩', '🐺', '🦊', '🦝', '🐱', '🐈', '🐈‍⬛', '🦁', '🐯', '🐅', '🐆', '🐴', '🐎', '🦄', '🦓', '🦌', '🦬', '🐮', '🐂', '🐃', '🐄', '🐷', '🐖', '🐗', '🐽', '🐏', '🐑', '🐐', '🐪', '🐫', '🦙', '🦒', '🐘', '🦣', '🦏', '🦛', '🐭', '🐁', '🐀', '🐹', '🐰', '🐇', '🐿️', '🦫', '🦔', '🦇', '🐻', '🐻‍❄️', '🐨', '🐼', '🦥', '🦦', '🦨', '🦘', '🦡', '🐾', '🦃', '🐔', '🐓', '🐣', '🐤', '🐥', '🐦', '🐧', '🕊️', '🦅', '🦆', '🦢', '🦉', '🦤', '🪶', '🦩', '🦚', '🦜', '🐸', '🐊', '🐢', '🦎', '🐍', '🐲', '🐉', '🦕', '🦖', '🐳', '🐋', '🐬', '🦭', '🐟', '🐠', '🐡', '🦈', '🐙', '🐚', '🪸', '🐌', '🦋', '🐛', '🐜', '🐝', '🪲', '🐞', '🦗', '🪳', '🕷️', '🕸️', '🦂', '🦟', '🪰', '🪱', '🦠', '🍄', '🌰', '🦀', '🦞', '🦐', '🦑'];
+                let hashcode = Math.abs(url.hashCode());
+                let download_id = `di${hashcode}`;
+                let eta_text = moment().add(eta, 'seconds').fromNow();
+                let icon = icons[hashcode % icons.length];
+
+                if (!document.getElementById(download_id)) {
+                    const markup = `
+                    <div id="${download_id}" class="list-group-item d-flex gap-3 py-3" aria-current="true">
+                        <img src="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>${icon}</text></svg>" alt="twbs" class="flex-shrink-0" width="32" height="32">
+                        <div class="d-flex gap-2 w-100 justify-content-between">
+                            <div style="width: 100%;">
+                                <h6 class="mb-2">${filename}</h6>
+                                <div class="progress" role="progressbar" aria-valuenow="${percentage}" aria-valuemin="0" aria-valuemax="100">
+                                    <div class="progress-bar" style="width: ${percentage}%"></div>
+                                </div>
+                                <small class="opacity-50 text-nowrap">${eta_text}</small>
+                           </div>
+                        </div>
+                    </div>
+                    `;
+                    downloads.appendChild(htmlToElement(markup));
+                }
+
+                document.querySelector(`#${download_id} .progress`).ariaValueNow = percentage;
+                document.querySelector(`#${download_id} .progress .progress-bar`).style.width = `${percentage}%`;
+                document.querySelector(`#${download_id} small`).innerHTML = eta_text;
+
+                if (percentage === 100.0) {
+                    document.querySelector(`#${download_id} .progress .progress-bar`).classList.add("bg-success");
+                } else {
+                    document.querySelector(`#${download_id} .progress .progress-bar`).classList.remove("bg-success");
+                }
+            }
+        });
+
+        /**
+         * @param {String} HTML representing a single element
+         * @return {Element}
+         */
+        function htmlToElement(html) {
+            var template = document.createElement('template');
+            html = html.trim(); // Never return a text node of whitespace as the result
+            template.innerHTML = html;
+            return template.content.firstChild;
+        }
+
+        /**
+         * @param {String} A string you want the hash of
+         * @return {Number} A hash of the string given as parameter
+         */
+        String.prototype.hashCode = function() {
+          var hash = 0,
+            i, chr;
+          if (this.length === 0) return hash;
+          for (i = 0; i < this.length; i++) {
+            chr = this.charCodeAt(i);
+            hash = ((hash << 5) - hash) + chr;
+            hash |= 0; // Convert to 32bit integer
+          }
+          return hash;
+        }
+    </script>
+    <script src="/bootstrap.min.js"></script>
+    <script src="/moment.min.js"></script>
+   </body>
+</html>

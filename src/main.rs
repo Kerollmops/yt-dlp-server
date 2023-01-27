@@ -1,12 +1,16 @@
+use std::collections::HashSet;
+use std::include_str as include;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use anyhow::{bail, Context};
+use axum::body::{Bytes, Full};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
-use axum::response::{Html, IntoResponse};
+use axum::http::{header, HeaderValue};
+use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
@@ -22,11 +26,13 @@ use tracing::{debug, error, info, trace};
 use url::Url;
 
 /// Do a simple `--progress-template '%(progress)j'` to see the JSON and the possibilities.
-const PROGRESS_TEMPLATE: &str = "%(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
+const PROGRESS_TEMPLATE: &str = "%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
 /// The regex that parses the above progress template.
 static PROGRESS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?P<index>\d+)/(?P<count>\d+) (?P<eta>\d+) (?P<filename>.+)").unwrap()
+    Regex::new(r"(?P<downbytes>\w+)/(?P<totalbytes>\w+) (?P<fragindex>\w+)/(?P<fragcount>\w+) (?P<eta>\d+) (?P<filename>.+)").unwrap()
 });
+/// The set of URLs currently being downloaded, removed once the media has been downloaded.
+static DOWNLOADING_URLS: Lazy<Mutex<HashSet<Url>>> = Lazy::new(Mutex::default);
 
 /// The server that listens and downloads videos by using yt-dlp.
 #[derive(Parser, Debug)]
@@ -69,7 +75,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/download", get(download_url))
-        .route("/", get(index))
+        .route("/", get(|| async { Html(include!("../html/index.html")) }))
+        .route("/moment.min.js", get(|| async { Js(include!("../js/moment.min.js")) }))
+        .route("/bootstrap.min.js", get(|| async { Js(include!("../js/bootstrap.min.js")) }))
+        .route("/bootstrap.min.css", get(|| async { Css(include!("../css/bootstrap.min.css")) }))
         .route("/websocket", get(websocket_handler))
         .with_state(app_state);
     debug!("Listening on {listen}...");
@@ -82,10 +91,14 @@ async fn download_url(
     State(state): State<Arc<AppState>>,
     Query(DownloadURL { url }): Query<DownloadURL>,
 ) {
-    trace!("Started downloading {url:?}...");
+    debug!("Started downloading {url:?}...");
     let url = Url::parse(&url).unwrap();
 
     task::spawn(async move {
+        if !DOWNLOADING_URLS.lock().unwrap().insert(url.clone()) {
+            return;
+        }
+
         let mut cmd = Command::new("yt-dlp")
             .args(["--paths", &state.download_folder.display().to_string()])
             .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
@@ -99,12 +112,14 @@ async fn download_url(
         let stdout_reader = BufReader::new(stdout);
         let mut stdout_lines = stdout_reader.lines();
         while let Some(line) = stdout_lines.next_line().await.unwrap() {
+            trace!("progress line {line:?}");
             if let Some(captures) = PROGRESS_REGEX.captures(&line) {
+                trace!("progress captures {captures:?}");
                 if let Ok(prg) = DownloadProgress::try_from(captures) {
-                    info!("Progress: {:?}", prg);
                     let content = json!({
-                        "filename": prg.filename,
-                        "percentage": (prg.index as f32) / (prg.count as f32),
+                        "filename": extract_clean_filename(prg.filename).unwrap_or("N/A".to_string()),
+                        "url": url.as_str(),
+                        "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
                         "eta": prg.eta,
                     });
                     if let Err(e) = progress.send(content.to_string()) {
@@ -114,12 +129,19 @@ async fn download_url(
             }
         }
 
+        DOWNLOADING_URLS.lock().unwrap().remove(&url);
+
         match cmd.wait().await {
             Ok(s) if !s.success() => error!("There is an issue downloading {url:?}, status: {s}"),
             Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
             _ => info!("Finished downloading {url:?}"),
         }
     });
+}
+
+/// Removes the folder hierarchy and the extension. Keeps the filename only.
+fn extract_clean_filename(path: impl AsRef<Path>) -> Option<String> {
+    Some(path.as_ref().with_extension("").file_name()?.to_string_lossy().to_string())
 }
 
 async fn websocket_handler(
@@ -142,15 +164,10 @@ async fn websocket(mut stream: WebSocket, state: Arc<AppState>) {
     }
 }
 
-// Include utf-8 file at **compile** time.
-async fn index() -> Html<&'static str> {
-    Html(std::include_str!("../index.html"))
-}
-
 #[derive(Debug)]
 struct DownloadProgress<'a> {
-    index: usize,
-    count: usize,
+    current: usize,
+    total: usize,
     eta: usize,
     filename: &'a str,
 }
@@ -159,11 +176,64 @@ impl<'a> TryFrom<Captures<'a>> for DownloadProgress<'a> {
     type Error = anyhow::Error;
 
     fn try_from(cap: Captures<'a>) -> Result<DownloadProgress<'a>, Self::Error> {
+        let best: anyhow::Result<_> = (|| {
+            let downbytes =
+                cap.name("downbytes").context("missing `downbytes`")?.as_str().parse()?;
+            let totalbytes =
+                cap.name("totalbytes").context("missing `totalbytes`")?.as_str().parse()?;
+            Ok((downbytes, totalbytes))
+        })();
+
+        let worse: anyhow::Result<_> = (|| {
+            let fragindex =
+                cap.name("fragindex").context("missing `fragindex`")?.as_str().parse()?;
+            let fragcount =
+                cap.name("fragcount").context("missing `fragcount`")?.as_str().parse()?;
+            Ok((fragindex, fragcount))
+        })();
+
+        let (current, total) = best.or(worse)?;
+
         Ok(DownloadProgress {
-            index: cap.name("index").context("missing `index`")?.as_str().parse()?,
-            count: cap.name("count").context("missing `count`")?.as_str().parse()?,
+            current,
+            total,
             eta: cap.name("eta").context("missing `eta`")?.as_str().parse()?,
             filename: cap.name("filename").context("missing `filename`")?.as_str(),
         })
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Js<T>(pub T);
+
+impl<T> IntoResponse for Js<T>
+where
+    T: Into<Full<Bytes>>,
+{
+    fn into_response(self) -> Response {
+        (
+            [(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static(mime::APPLICATION_JAVASCRIPT_UTF_8.as_ref()),
+            )],
+            self.0.into(),
+        )
+            .into_response()
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Css<T>(pub T);
+
+impl<T> IntoResponse for Css<T>
+where
+    T: Into<Full<Bytes>>,
+{
+    fn into_response(self) -> Response {
+        (
+            [(header::CONTENT_TYPE, HeaderValue::from_static(mime::TEXT_CSS_UTF_8.as_ref()))],
+            self.0.into(),
+        )
+            .into_response()
     }
 }

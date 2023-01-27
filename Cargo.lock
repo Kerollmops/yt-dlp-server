@@ -1286,6 +1286,7 @@ dependencies = [
  "axum",
  "clap",
  "futures",
+ "mime",
  "once_cell",
  "regex",
  "serde",
