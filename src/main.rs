@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/bootstrap.min.css", get(|| async { Css(include!("../css/bootstrap.min.css")) }))
         .route("/websocket", get(websocket_handler))
         .with_state(app_state);
-    debug!("Listening on {listen}...");
+    info!("Listening on {listen}...");
     axum::Server::bind(&listen).serve(app.into_make_service()).await?;
 
     Ok(())
@@ -91,7 +91,7 @@ async fn download_url(
     State(state): State<Arc<AppState>>,
     Query(DownloadURL { url }): Query<DownloadURL>,
 ) {
-    debug!("Started downloading {url:?}...");
+    info!("Started downloading {url}...");
     let url = Url::parse(&url).unwrap();
 
     task::spawn(async move {
@@ -134,7 +134,7 @@ async fn download_url(
         match cmd.wait().await {
             Ok(s) if !s.success() => error!("There is an issue downloading {url:?}, status: {s}"),
             Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
-            _ => info!("Finished downloading {url:?}"),
+            _ => info!("Finished downloading {url}"),
         }
     });
 }
