@@ -122,9 +122,7 @@ async fn download_url(
                         "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
                         "eta": prg.eta,
                     });
-                    if let Err(e) = progress.send(content.to_string()) {
-                        error!("Cannot send the download progress to the users: {e}");
-                    }
+                    let _ = progress.send(content.to_string());
                 }
             }
         }
