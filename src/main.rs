@@ -101,6 +101,7 @@ async fn download_url(
 
         let mut cmd = Command::new("yt-dlp")
             .args(["--paths", &state.download_folder.display().to_string()])
+            .args(["--format", "bestvideo*+bestaudio/best"])
             .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
             .args(["--", url.as_str()])
             .stdout(Stdio::piped())
