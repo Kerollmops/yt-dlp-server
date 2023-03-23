@@ -49,7 +49,15 @@
     <div class="container main-content">
         <h1>📺 Yt-DLP server</h1>
         <span id="connection-status" class="badge text-bg-secondary">Not Connected</span>
-        <p class="mt-2">Keep track of the ongoing downloads running on the Yt-DLP server.</p>
+        <p class="mt-2">Keep track of the ongoing downloads running on the <nobr>Yt-DLP</nobr> server.</p>
+
+        <form class="form-inline mt-2" action="download" method="get">
+          <div class="form-group">
+            <label for="inputURL">Download this URL</label>
+            <input type="url" required class="form-control" name="url" id="inputURL" placeholder="https://youtube.com/watch?v=eBGIQ7ZuuiU">
+          </div>
+        </form>
+
         <div id="downloads" class="list-group w-auto mt-2">
             <!--  -->
         </div>
