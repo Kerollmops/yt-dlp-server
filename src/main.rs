@@ -10,7 +10,7 @@ use axum::body::{Bytes, Full};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderValue};
-use axum::response::{Html, IntoResponse, Response};
+use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use clap::Parser;
@@ -90,7 +90,7 @@ async fn main() -> anyhow::Result<()> {
 async fn download_url(
     State(state): State<Arc<AppState>>,
     Query(DownloadURL { url }): Query<DownloadURL>,
-) {
+) -> Redirect {
     info!("Started downloading {url}...");
     let url = Url::parse(&url).unwrap();
 
@@ -136,6 +136,8 @@ async fn download_url(
             _ => info!("Finished downloading {url}"),
         }
     });
+
+    Redirect::temporary("/")
 }
 
 /// Removes the folder hierarchy and the extension. Keeps the filename only.
