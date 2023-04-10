@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{include_str as include, thread};
+use std::{fs, include_str as include, thread};
 
 use anyhow::{bail, Context};
 use axum::body::{Bytes, Full};
@@ -14,12 +14,15 @@ use axum::http::{header, HeaderValue};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
+use chrono::{DateTime, Utc};
 use clap::Parser;
 use crossbeam_channel::bounded;
+use heed::types::{SerdeJson, Str};
+use heed::{Database, EnvOpenOptions};
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex, RegexBuilder};
 use reqwest::{redirect, ClientBuilder};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
@@ -65,7 +68,8 @@ struct SubscribeURL {
 }
 
 struct AppState {
-    subscribe_to_channel: crossbeam_channel::Sender<(ChannelId, Regex)>,
+    env: heed::Env,
+    subscriptions: Database<Str, SerdeJson<ChannelSubscription>>,
     download_media: crossbeam_channel::Sender<Url>,
     progress: broadcast::Sender<String>,
 }
@@ -75,11 +79,20 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
     let Args { listen, download_folder } = Args::parse();
-    let (subscribe_to_channel_sender, subscribe_to_channel_receiver) = bounded(10);
     let (download_media_sender, download_media_receiver) = bounded(10);
+
+    let db_path = download_folder.join("yt-dlp-server.db");
+    let _ = fs::create_dir_all(&db_path);
+    let env = EnvOpenOptions::new().open(&db_path)?;
+    let mut wtxn = env.write_txn()?;
+    let subscriptions: Database<Str, SerdeJson<ChannelSubscription>> =
+        env.create_database(&mut wtxn, None)?;
+    wtxn.commit()?;
+
     let app_state = Arc::new(AppState {
-        subscribe_to_channel: subscribe_to_channel_sender,
-        download_media: download_media_sender,
+        env: env.clone(),
+        subscriptions,
+        download_media: download_media_sender.clone(),
         progress: broadcast::channel(100).0,
     });
 
@@ -92,50 +105,15 @@ async fn main() -> anyhow::Result<()> {
         Err(e) => bail!("While running `yt-dlp --version`: {e}"),
     };
 
-    let download_media = app_state.download_media.clone();
     thread::spawn(move || {
-        for (channel_id, restrict) in subscribe_to_channel_receiver {
-            let download_media = download_media.clone();
-            thread::spawn(move || {
-                loop {
-                    let client = reqwest::blocking::ClientBuilder::new()
-                        .cookie_store(true)
-                        .redirect(redirect::Policy::limited(10))
-                        .build()
-                        .unwrap();
-                    let xml = client
-                        .get(format!(
-                            "https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"
-                        ))
-                        .send()
-                        .unwrap()
-                        .bytes()
-                        .unwrap();
+        let env = env.clone();
+        let download_media = download_media_sender.clone();
+        loop {
+            if let Err(e) = fetch_new_medium(&env, subscriptions, &download_media) {
+                error!("Failed fetching new medium: {e}");
+            }
 
-                    let feed = feed_rs::parser::parse(&xml[..]).unwrap();
-                    for entry in feed.entries {
-                        if let Some(title) = entry.title.map(|t| t.content) {
-                            // Make the regex case-insensitive
-                            let restrict = RegexBuilder::new(restrict.as_str())
-                                .case_insensitive(true)
-                                .build()
-                                .unwrap();
-
-                            if restrict.is_match(&title) {
-                                if let Some(link) = entry.links.first() {
-                                    if let Ok(url) = Url::parse(&link.href) {
-                                        if let Err(e) = download_media.send(url) {
-                                            error!("{e}");
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    thread::sleep(Duration::from_secs(30 * 60)); // 30 minutes
-                }
-            });
+            thread::sleep(Duration::from_secs(30 * 60)); // 30 minutes
         }
     });
 
@@ -202,7 +180,19 @@ async fn subscribe_url(
 
     if let Some(channel_id) = channel_id {
         info!("Extracted the channel id {channel_id}...");
-        state.subscribe_to_channel.send((channel_id, restrict)).unwrap();
+        let channel_name = fetch_feed_title(&channel_id).unwrap().unwrap_or(channel_id.clone());
+        let mut wtxn = state.env.write_txn().unwrap();
+        let key = format!("{channel_id}{restrict}");
+        if state.subscriptions.get(&wtxn, &key).unwrap().is_none() {
+            let sub = ChannelSubscription {
+                channel_name,
+                channel_id,
+                restrict,
+                last_pull: chrono::Utc::now(),
+            };
+            state.subscriptions.put(&mut wtxn, &key, &sub).unwrap();
+            wtxn.commit().unwrap();
+        }
     }
 
     Redirect::temporary("/")
@@ -276,10 +266,10 @@ async fn download_url_with_ytdlp(
     url: Url,
     progress: broadcast::Sender<String>,
     download_folder: PathBuf,
-) {
+) -> anyhow::Result<()> {
     info!("Started downloading {url}...");
     if !DOWNLOADING_URLS.lock().unwrap().insert(url.clone()) {
-        return;
+        return Ok(());
     }
 
     let mut cmd = Command::new("yt-dlp")
@@ -288,13 +278,12 @@ async fn download_url_with_ytdlp(
         .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
         .args(["--", url.as_str()])
         .stdout(Stdio::piped())
-        .spawn()
-        .unwrap();
+        .spawn()?;
 
     let stdout = cmd.stdout.as_mut().unwrap();
     let stdout_reader = BufReader::new(stdout);
     let mut stdout_lines = stdout_reader.lines();
-    while let Some(line) = stdout_lines.next_line().await.unwrap() {
+    while let Some(line) = stdout_lines.next_line().await? {
         trace!("progress line {line:?}");
         if let Some(captures) = PROGRESS_REGEX.captures(&line) {
             trace!("progress captures {captures:?}");
@@ -319,6 +308,95 @@ async fn download_url_with_ytdlp(
         Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
         _ => info!("Finished downloading {url}"),
     }
+
+    Ok(())
+}
+
+/// Fetches the channel name, the URLs and publish datetime of the given YouTube channel.
+fn fetch_filtered_feed(
+    channel_id: ChannelId,
+    restrict: Regex,
+) -> anyhow::Result<Vec<(Url, DateTime<Utc>)>> {
+    let client = reqwest::blocking::ClientBuilder::new()
+        .cookie_store(true)
+        .redirect(redirect::Policy::limited(10))
+        .build()?;
+
+    let url = format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}");
+    let xml = client.get(url).send()?.bytes()?;
+
+    // Make the regex case-insensitive
+    let restrict = RegexBuilder::new(restrict.as_str()).case_insensitive(true).build()?;
+
+    let feed = feed_rs::parser::parse(&xml[..])?;
+    let mut urls_published = Vec::new();
+    for entry in feed.entries {
+        if let Some(title) = entry.title.map(|t| t.content) {
+            if restrict.is_match(&title) {
+                if let Some((link, published)) = entry.links.first().zip(entry.published) {
+                    if let Ok(url) = Url::parse(&link.href) {
+                        urls_published.push((url, published));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(urls_published)
+}
+
+fn fetch_feed_title(channel_id: &ChannelId) -> anyhow::Result<Option<String>> {
+    let xml =
+        ureq::get(&format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}"))
+            .call()?
+            .into_string()?;
+    let feed = feed_rs::parser::parse(xml.as_bytes())?;
+    Ok(feed.title.map(|t| t.content))
+}
+
+fn fetch_new_medium(
+    env: &heed::Env,
+    subscriptions: Database<Str, SerdeJson<ChannelSubscription>>,
+    download_media: &crossbeam_channel::Sender<Url>,
+) -> anyhow::Result<()> {
+    // Pull the list of feeds to fetch and fetch the videos
+    // that were published betwnee now and the last pull we did.
+    let rtxn = env.read_txn()?;
+    let now = chrono::Utc::now();
+    for result in subscriptions.iter(&rtxn)? {
+        let (_key, sub) = result?;
+        let ChannelSubscription { channel_id, last_pull, restrict, .. } = sub;
+        let entries = fetch_filtered_feed(channel_id, restrict)?;
+        for (url, published) in entries {
+            if published > last_pull {
+                if let Err(e) = download_media.send(url) {
+                    error!("while sending in the channel: {e}");
+                }
+            }
+        }
+    }
+
+    // Mark all of our subscriptions as recently-pulled
+    let mut wtxn = env.write_txn()?;
+    let mut iter = subscriptions.iter_mut(&mut wtxn)?;
+    while let Some(result) = iter.next() {
+        let (key, mut sub) = result?;
+        sub.last_pull = now;
+        unsafe { iter.put_current(key, &sub)? };
+    }
+    drop(iter);
+    wtxn.commit()?;
+
+    Ok(())
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ChannelSubscription {
+    channel_name: String,
+    channel_id: String,
+    #[serde(with = "serde_regex")]
+    restrict: Regex,
+    last_pull: DateTime<Utc>,
 }
 
 #[derive(Clone, Copy, Debug)]
