@@ -17,7 +17,7 @@ use axum::Router;
 use clap::Parser;
 use crossbeam_channel::bounded;
 use once_cell::sync::Lazy;
-use regex::{Captures, Regex};
+use regex::{Captures, Regex, RegexBuilder};
 use reqwest::{redirect, ClientBuilder};
 use serde::Deserialize;
 use serde_json::json;
@@ -115,6 +115,12 @@ async fn main() -> anyhow::Result<()> {
                     let feed = feed_rs::parser::parse(&xml[..]).unwrap();
                     for entry in feed.entries {
                         if let Some(title) = entry.title.map(|t| t.content) {
+                            // Make the regex case-insensitive
+                            let restrict = RegexBuilder::new(restrict.as_str())
+                                .case_insensitive(true)
+                                .build()
+                                .unwrap();
+
                             if restrict.is_match(&title) {
                                 if let Some(link) = entry.links.first() {
                                     if let Ok(url) = Url::parse(&link.href) {
