@@ -58,7 +58,17 @@
           </div>
         </form>
 
-        <div id="downloads" class="list-group w-auto mt-2">
+        <form class="form-inline mt-3" action="subscribe" method="get">
+          <label for="inputSubscribeURL">Subscribe to this channel</label>
+          <div class="input-group">
+            <input type="url" required class="form-control" name="url" id="inputSubscribeURL" placeholder="https://youtube.com/@AlphaReplay">
+            <span class="input-group-text">regex</span>
+            <input type="text" class="form-control" name="restrict" id="inputRestrict" placeholder="Speedrun Bloodborne">
+          </div>
+          <input type="submit" style="visibility: hidden;"/>
+        </form>
+
+        <div id="downloads" class="list-group w-auto mt-3">
             <!--  -->
         </div>
     </div>
