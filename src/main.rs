@@ -139,62 +139,14 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
+    // Listen and download the URLs sent through the channel
     let progress = app_state.progress.clone();
     task::spawn(async move {
         let progress = progress.clone();
         for url in download_media_receiver {
             let progress = progress.clone();
             let download_folder = download_folder.clone();
-            task::spawn(async move {
-                info!("Started downloading {url}...");
-                if !DOWNLOADING_URLS.lock().unwrap().insert(url.clone()) {
-                    return;
-                }
-
-                let mut cmd = Command::new("yt-dlp")
-                    .args(["--paths", &download_folder.display().to_string()])
-                    .args(["--format", "bestvideo*+bestaudio/best"])
-                    .args([
-                        "-q",
-                        "--progress",
-                        "--newline",
-                        "--progress-template",
-                        PROGRESS_TEMPLATE,
-                    ])
-                    .args(["--", url.as_str()])
-                    .stdout(Stdio::piped())
-                    .spawn()
-                    .unwrap();
-
-                let stdout = cmd.stdout.as_mut().unwrap();
-                let stdout_reader = BufReader::new(stdout);
-                let mut stdout_lines = stdout_reader.lines();
-                while let Some(line) = stdout_lines.next_line().await.unwrap() {
-                    trace!("progress line {line:?}");
-                    if let Some(captures) = PROGRESS_REGEX.captures(&line) {
-                        trace!("progress captures {captures:?}");
-                        if let Ok(prg) = DownloadProgress::try_from(captures) {
-                            let content = json!({
-                                "filename": extract_clean_filename(prg.filename).unwrap_or("N/A".to_string()),
-                                "url": url.as_str(),
-                                "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
-                                "eta": prg.eta,
-                            });
-                            let _ = progress.send(content.to_string());
-                        }
-                    }
-                }
-
-                DOWNLOADING_URLS.lock().unwrap().remove(&url);
-
-                match cmd.wait().await {
-                    Ok(s) if !s.success() => {
-                        error!("There is an issue downloading {url:?}, status: {s}")
-                    }
-                    Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
-                    _ => info!("Finished downloading {url}"),
-                }
-            });
+            task::spawn(async move { download_url_with_ytdlp(url, progress, download_folder) });
         }
     });
 
@@ -317,6 +269,55 @@ impl<'a> TryFrom<Captures<'a>> for DownloadProgress<'a> {
             eta: cap.name("eta").context("missing `eta`")?.as_str().parse()?,
             filename: cap.name("filename").context("missing `filename`")?.as_str(),
         })
+    }
+}
+
+async fn download_url_with_ytdlp(
+    url: Url,
+    progress: broadcast::Sender<String>,
+    download_folder: PathBuf,
+) {
+    info!("Started downloading {url}...");
+    if !DOWNLOADING_URLS.lock().unwrap().insert(url.clone()) {
+        return;
+    }
+
+    let mut cmd = Command::new("yt-dlp")
+        .args(["--paths", &download_folder.display().to_string()])
+        .args(["--format", "bestvideo*+bestaudio/best"])
+        .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
+        .args(["--", url.as_str()])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    let stdout = cmd.stdout.as_mut().unwrap();
+    let stdout_reader = BufReader::new(stdout);
+    let mut stdout_lines = stdout_reader.lines();
+    while let Some(line) = stdout_lines.next_line().await.unwrap() {
+        trace!("progress line {line:?}");
+        if let Some(captures) = PROGRESS_REGEX.captures(&line) {
+            trace!("progress captures {captures:?}");
+            if let Ok(prg) = DownloadProgress::try_from(captures) {
+                let content = json!({
+                    "filename": extract_clean_filename(prg.filename).unwrap_or("N/A".to_string()),
+                    "url": url.as_str(),
+                    "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
+                    "eta": prg.eta,
+                });
+                let _ = progress.send(content.to_string());
+            }
+        }
+    }
+
+    DOWNLOADING_URLS.lock().unwrap().remove(&url);
+
+    match cmd.wait().await {
+        Ok(s) if !s.success() => {
+            error!("There is an issue downloading {url:?}, status: {s}")
+        }
+        Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
+        _ => info!("Finished downloading {url}"),
     }
 }
 
