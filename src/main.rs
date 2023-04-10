@@ -119,12 +119,14 @@ async fn main() -> anyhow::Result<()> {
 
     // Listen and download the URLs sent through the channel
     let progress = app_state.progress.clone();
-    task::spawn(async move {
+    task::spawn_blocking(move || {
         let progress = progress.clone();
         for url in download_media_receiver {
             let progress = progress.clone();
             let download_folder = download_folder.clone();
-            task::spawn(async move { download_url_with_ytdlp(url, progress, download_folder) });
+            task::spawn(
+                async move { download_url_with_ytdlp(url, progress, download_folder).await },
+            );
         }
     });
 
