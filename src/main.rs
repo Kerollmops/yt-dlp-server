@@ -20,6 +20,7 @@ use clap::Parser;
 use crossbeam_channel::bounded;
 use heed::types::{SerdeJson, Str};
 use heed::{Database, EnvOpenOptions};
+use humantime::FormattedDuration;
 use once_cell::sync::Lazy;
 use regex::{Captures, Regex, RegexBuilder};
 use reqwest::{redirect, ClientBuilder};
@@ -236,7 +237,7 @@ struct Subscription {
     id: String,
     channel_name: String,
     restrict: String,
-    last_pull: DateTime<Utc>,
+    last_pull: FormattedDuration,
 }
 
 async fn list_subscriptions(State(state): State<Arc<AppState>>) -> SubscriptionsTemplate {
@@ -244,11 +245,17 @@ async fn list_subscriptions(State(state): State<Arc<AppState>>) -> Subscriptions
     let rtxn = state.env.read_txn().unwrap();
     for result in state.subscriptions.iter(&rtxn).unwrap() {
         let (id, ChannelSubscription { channel_name, restrict, last_pull, .. }) = result.unwrap();
+        let duration = {
+            let duration = Utc::now() - last_pull;
+            let duration = Duration::from_secs(duration.num_seconds().try_into().unwrap_or(0));
+            humantime::Duration::from(duration)
+        };
+
         subscriptions.push(Subscription {
             id: id.to_string(),
             channel_name,
             restrict: restrict.to_string(),
-            last_pull,
+            last_pull: humantime::format_duration(*duration),
         });
     }
     SubscriptionsTemplate { subscriptions }

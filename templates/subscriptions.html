@@ -12,7 +12,7 @@
                 {% if subscription.restrict.len() != 0 -%}
                 <p class="mb-0">Restricted by <code>{{ subscription.restrict }}</code>.</p>
                 {% endif -%}
-                <small class="opacity-50 text-nowrap">Pulled {{ subscription.last_pull }}</small>
+                <small class="opacity-50 text-nowrap">Pulled {{ subscription.last_pull }} ago.</small>
             </div>
         </div>
 
