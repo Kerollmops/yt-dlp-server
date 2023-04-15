@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📺</text></svg>">
+    <title>Yt-DLP server</title>
+    <link href="/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .main-content {
+            max-width: 460px;
+            margin: 4rem auto;
+        }
+
+        .form-check-input-placeholder {
+            border-style: dashed;
+        }
+
+        .list-group-checkable .list-group-item {
+            cursor: pointer;
+        }
+
+        .list-group-item-check {
+            position: absolute;
+            clip: rect(0, 0, 0, 0);
+        }
+
+        .list-group-item-check[disabled]+.list-group-item,
+        .list-group-item-check:disabled+.list-group-item {
+            pointer-events: none;
+            filter: none;
+            opacity: .5;
+        }
+
+        .list-group-radio .list-group-item {
+            cursor: pointer;
+            border-radius: .5rem;
+        }
+
+        .list-group-radio .form-check-input {
+            z-index: 2;
+            margin-top: -.5em;
+        }
+
+        .list-group-radio .form-check-input[disabled]+.list-group-item,
+        .list-group-radio .form-check-input:disabled+.list-group-item {
+            pointer-events: none;
+            filter: none;
+            opacity: .5;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container main-content">
+        <h1>📺 Yt-DLP server</h1>
+        <span id="connection-status" class="badge text-bg-secondary">Not Connected</span>
+        <p class="mt-2">Keep track of <a href="/">the ongoing downloads</a> running on the <nobr>Yt-DLP</nobr>
+            server.
+            You can manage <a href="/subscriptions">the subscriptions</a> on the dedicated page.</p>
+
+        <form class="form-inline mt-2" action="download" method="get">
+            <div class="form-group">
+                <label for="inputURL">Download this URL</label>
+                <input type="url" required class="form-control" name="url" id="inputURL"
+                    placeholder="https://youtube.com/watch?v=eBGIQ7ZuuiU">
+            </div>
+        </form>
+
+        <form class="form-inline mt-3" action="subscribe" method="get">
+            <label for="inputSubscribeURL">Subscribe to this channel</label>
+            <div class="input-group">
+                <input type="url" required class="form-control" name="url" id="inputSubscribeURL"
+                    placeholder="https://youtube.com/@AlphaReplay">
+                <span class="input-group-text">regex</span>
+                <input type="text" class="form-control" name="restrict" id="inputRestrict"
+                    placeholder="Speedrun Bloodborne">
+            </div>
+            <input type="submit" style="visibility: hidden;" />
+        </form>
+
+        {% block content %}{% endblock %}
+    </div>
+
+    <script>
+        window.addEventListener('load', () => {
+            // Set the current system prefered theme
+            if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+                document.documentElement.setAttribute('data-bs-theme', 'dark')
+            } else {
+                document.documentElement.setAttribute('data-bs-theme', 'light')
+            }
+
+            const connection_status = document.getElementById("connection-status");
+            const websocket = new WebSocket('ws://' + window.location.host + `/websocket`);
+
+            websocket.onopen = function () {
+                connection_status.classList = "badge text-bg-success"
+                connection_status.innerHTML = "Connected";
+            }
+
+            websocket.onclose = function () {
+                connection_status.classList = "badge text-bg-danger"
+                connection_status.innerHTML = "Disconnected";
+            }
+
+            {% block script %} {% endblock %}
+        });
+
+        /**
+         * @param {String} HTML representing a single element
+         * @return {Element}
+         */
+        function htmlToElement(html) {
+            var template = document.createElement('template');
+            html = html.trim(); // Never return a text node of whitespace as the result
+            template.innerHTML = html;
+            return template.content.firstChild;
+        }
+
+        /**
+         * @param {String} A string you want the hash of
+         * @return {Number} A hash of the string given as parameter
+         */
+        String.prototype.hashCode = function () {
+            var hash = 0,
+                i, chr;
+            if (this.length === 0) return hash;
+            for (i = 0; i < this.length; i++) {
+                chr = this.charCodeAt(i);
+                hash = ((hash << 5) - hash) + chr;
+                hash |= 0; // Convert to 32bit integer
+            }
+            return hash;
+        }
+    </script>
+    <script src="/bootstrap.min.js"></script>
+    <script src="/moment.min.js"></script>
+</body>
+
+</html>

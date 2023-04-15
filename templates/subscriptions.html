@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="list-group w-auto mt-3">
+    {% for subscription in subscriptions %}
+    <div class="list-group-item d-flex gap-3 py-3" aria-current="true">
+        <img src="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎞️</text></svg>"
+            alt="twbs" class="flex-shrink-0" width="32" height="32">
+        <div class="d-flex gap-2 w-100 justify-content-between">
+            <div style="width: 100%;">
+                <h6 class="mb-1">{{ subscription.channel_name }}</h6>
+                {% if subscription.restrict.len() != 0 -%}
+                <p class="mb-0">Restricted by <code>{{ subscription.restrict }}</code>.</p>
+                {% endif -%}
+                <small class="opacity-50 text-nowrap">Pulled {{ subscription.last_pull }}</small>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+</div>
+{% endblock %}

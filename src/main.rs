@@ -4,14 +4,15 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{fs, include_str as include, thread};
+use std::{fs, include_str as include, thread, vec};
 
 use anyhow::{bail, Context};
+use askama::Template;
 use axum::body::{Bytes, Full};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
 use axum::http::{header, HeaderValue};
-use axum::response::{Html, IntoResponse, Redirect, Response};
+use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::get;
 use axum::Router;
 use chrono::{DateTime, Utc};
@@ -131,9 +132,10 @@ async fn main() -> anyhow::Result<()> {
     });
 
     let app = Router::new()
+        .route("/", get(index))
         .route("/download", get(download_url))
         .route("/subscribe", get(subscribe_url))
-        .route("/", get(|| async { Html(include!("../html/index.html")) }))
+        .route("/subscriptions", get(list_subscriptions))
         .route("/moment.min.js", get(|| async { Js(include!("../js/moment.min.js")) }))
         .route("/bootstrap.min.js", get(|| async { Js(include!("../js/bootstrap.min.js")) }))
         .route("/bootstrap.min.css", get(|| async { Css(include!("../css/bootstrap.min.css")) }))
@@ -143,6 +145,14 @@ async fn main() -> anyhow::Result<()> {
     axum::Server::bind(&listen).serve(app.into_make_service()).await?;
 
     Ok(())
+}
+
+#[derive(Template)]
+#[template(path = "base.html")]
+struct IndexTemplate;
+
+async fn index() -> IndexTemplate {
+    IndexTemplate
 }
 
 async fn download_url(
@@ -197,7 +207,35 @@ async fn subscribe_url(
         }
     }
 
-    Redirect::temporary("/")
+    Redirect::temporary("/subscriptions")
+}
+
+#[derive(Template)]
+#[template(path = "subscriptions.html")]
+struct SubscriptionsTemplate {
+    subscriptions: Vec<Subscription>,
+}
+
+struct Subscription {
+    id: String,
+    channel_name: String,
+    restrict: String,
+    last_pull: DateTime<Utc>,
+}
+
+async fn list_subscriptions(State(state): State<Arc<AppState>>) -> SubscriptionsTemplate {
+    let mut subscriptions = vec![];
+    let rtxn = state.env.read_txn().unwrap();
+    for result in state.subscriptions.iter(&rtxn).unwrap() {
+        let (id, ChannelSubscription { channel_name, restrict, last_pull, .. }) = result.unwrap();
+        subscriptions.push(Subscription {
+            id: id.to_string(),
+            channel_name,
+            restrict: restrict.to_string(),
+            last_pull,
+        });
+    }
+    SubscriptionsTemplate { subscriptions }
 }
 
 /// Removes the folder hierarchy and the extension. Keeps the filename only.
