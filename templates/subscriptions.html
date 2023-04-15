@@ -15,6 +15,11 @@
                 <small class="opacity-50 text-nowrap">Pulled {{ subscription.last_pull }}</small>
             </div>
         </div>
+
+        <form class="form-inline mt-3" action="unsubscribe" method="get">
+            <input type="text" style="display: none;" name="id" value="{{ subscription.id }}">
+            <button type="submit" class="unsubscribe-close btn-close" aria-label="Close"></button>
+        </form>
     </div>
     {% endfor %}
 </div>

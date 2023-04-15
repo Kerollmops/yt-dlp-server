@@ -135,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(index))
         .route("/download", get(download_url))
         .route("/subscribe", get(subscribe_url))
+        .route("/unsubscribe", get(unsubscribe_id))
         .route("/subscriptions", get(list_subscriptions))
         .route("/moment.min.js", get(|| async { Js(include!("../js/moment.min.js")) }))
         .route("/bootstrap.min.js", get(|| async { Js(include!("../js/bootstrap.min.js")) }))
@@ -207,6 +208,21 @@ async fn subscribe_url(
         }
     }
 
+    Redirect::temporary("/subscriptions")
+}
+
+#[derive(Deserialize)]
+struct UnsubscribeId {
+    id: String,
+}
+
+async fn unsubscribe_id(
+    State(state): State<Arc<AppState>>,
+    Query(UnsubscribeId { id }): Query<UnsubscribeId>,
+) -> Redirect {
+    let mut wtxn = state.env.write_txn().unwrap();
+    state.subscriptions.delete(&mut wtxn, &id).unwrap();
+    wtxn.commit().unwrap();
     Redirect::temporary("/subscriptions")
 }
 
