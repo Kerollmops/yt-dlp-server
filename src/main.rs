@@ -82,7 +82,7 @@ async fn main() -> anyhow::Result<()> {
     let Args { listen, download_folder } = Args::parse();
     let (download_media_sender, download_media_receiver) = bounded(10);
 
-    let db_path = download_folder.join("yt-dlp-server.db");
+    let db_path = download_folder.join(".yt-dlp-server.db");
     let _ = fs::create_dir_all(&db_path);
     let env = EnvOpenOptions::new().open(&db_path)?;
     let mut wtxn = env.write_txn()?;
