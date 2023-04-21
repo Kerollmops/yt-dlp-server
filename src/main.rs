@@ -37,7 +37,7 @@ use url::Url;
 const PROGRESS_TEMPLATE: &str = "%(progress.downloaded_bytes)s/%(progress.total_bytes)s %(progress.fragment_index)s/%(progress.fragment_count)s %(progress.eta)s %(progress.filename)s";
 /// The regex that parses the above progress template.
 static PROGRESS_REGEX: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"(?P<downbytes>\w+)/(?P<totalbytes>\w+) (?P<fragindex>\w+)/(?P<fragcount>\w+) (?P<eta>\d+) (?P<filename>.+)").unwrap()
+    Regex::new(r"(?P<downbytes>\w+)/(?P<totalbytes>\w+) (?P<fragindex>\w+)/(?P<fragcount>\w+) (?P<eta>\w+) (?P<filename>.+)").unwrap()
 });
 /// The set of URLs currently being downloaded, removed once the media has been downloaded.
 static DOWNLOADING_URLS: Lazy<Mutex<HashSet<Url>>> = Lazy::new(Mutex::default);
@@ -150,7 +150,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 #[derive(Template)]
-#[template(path = "base.html")]
+#[template(path = "downloads.html")]
 struct IndexTemplate;
 
 async fn index() -> IndexTemplate {
@@ -328,10 +328,22 @@ impl<'a> TryFrom<Captures<'a>> for DownloadProgress<'a> {
 
         let (current, total) = best.or(worse)?;
 
+        let eta = match cap.name("eta").map(|eta| eta.as_str().parse()) {
+            Some(Ok(eta)) => eta,
+            Some(Err(e)) => {
+                error!("invalid eta value `{}`", e);
+                0
+            }
+            None => {
+                error!("missing eta field");
+                0
+            }
+        };
+
         Ok(DownloadProgress {
             current,
             total,
-            eta: cap.name("eta").context("missing `eta`")?.as_str().parse()?,
+            eta,
             filename: cap.name("filename").context("missing `filename`")?.as_str(),
         })
     }
