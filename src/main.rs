@@ -262,8 +262,14 @@ async fn list_subscriptions(State(state): State<Arc<AppState>>) -> Subscriptions
 }
 
 /// Removes the folder hierarchy and the extension. Keeps the filename only.
-fn extract_clean_filename(path: impl AsRef<Path>) -> Option<String> {
-    Some(path.as_ref().with_extension("").file_name()?.to_string_lossy().to_string())
+fn extract_clean_filename(path: impl AsRef<Path>) -> anyhow::Result<String> {
+    Ok(path
+        .as_ref()
+        .with_extension("")
+        .file_name()
+        .context("can't extract the filename")?
+        .to_string_lossy()
+        .to_string())
 }
 
 async fn websocket_handler(
@@ -292,6 +298,12 @@ struct DownloadProgress<'a> {
     total: usize,
     eta: usize,
     filename: &'a str,
+}
+
+impl Default for DownloadProgress<'static> {
+    fn default() -> DownloadProgress<'static> {
+        DownloadProgress { current: 0, total: 100, eta: 0, filename: "" }
+    }
 }
 
 impl<'a> TryFrom<Captures<'a>> for DownloadProgress<'a> {
@@ -350,15 +362,27 @@ async fn download_url_with_ytdlp(
         trace!("progress line {line:?}");
         if let Some(captures) = PROGRESS_REGEX.captures(&line) {
             trace!("progress captures {captures:?}");
-            if let Ok(prg) = DownloadProgress::try_from(captures) {
-                let content = json!({
-                    "filename": extract_clean_filename(prg.filename).unwrap_or("N/A".to_string()),
-                    "url": url.as_str(),
-                    "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
-                    "eta": prg.eta,
-                });
-                let _ = progress.send(content.to_string());
-            }
+            let prg = match DownloadProgress::try_from(captures) {
+                Ok(prg) => prg,
+                Err(e) => {
+                    error!("can't create download progress: {e}");
+                    DownloadProgress::default()
+                }
+            };
+            let filename = match extract_clean_filename(prg.filename) {
+                Ok(filename) => filename,
+                Err(e) => {
+                    error!("can't extract clean filename: {e}");
+                    String::from("N/A")
+                }
+            };
+            let content = json!({
+                "filename": filename,
+                "url": url.as_str(),
+                "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
+                "eta": prg.eta,
+            });
+            let _ = progress.send(content.to_string());
         }
     }
 
