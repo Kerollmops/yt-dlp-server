@@ -52,6 +52,10 @@ struct Args {
     #[arg(short, long, default_value = "0.0.0.0:8989")]
     listen: SocketAddr,
 
+    /// The folder where the database is located.
+    #[arg(short, long, default_value = ".")]
+    database_folder: PathBuf,
+
     /// The folder where videos should be downloaded.
     #[arg(short, long, default_value = "downloads")]
     download_folder: PathBuf,
@@ -80,12 +84,12 @@ struct AppState {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let Args { listen, download_folder } = Args::parse();
+    let Args { listen, database_folder, download_folder } = Args::parse();
     let (download_media_sender, download_media_receiver) = bounded(10);
 
-    let db_path = download_folder.join(".yt-dlp-server.db");
-    let _ = fs::create_dir_all(&db_path);
-    let env = EnvOpenOptions::new().open(&db_path)?;
+    let database_path = database_folder.join(".yt-dlp-server.db");
+    let _ = fs::create_dir_all(&database_path);
+    let env = EnvOpenOptions::new().open(&database_path)?;
     let mut wtxn = env.write_txn()?;
     let subscriptions: Database<Str, SerdeJson<ChannelSubscription>> =
         env.create_database(&mut wtxn, None)?;
