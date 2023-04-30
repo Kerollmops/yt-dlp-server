@@ -53,12 +53,16 @@ struct Args {
     listen: SocketAddr,
 
     /// The folder where the database is located.
-    #[arg(short, long, default_value = ".")]
+    #[arg(long, default_value = ".")]
     database_folder: PathBuf,
 
-    /// The folder where videos should be downloaded.
-    #[arg(short, long, default_value = "downloads")]
-    download_folder: PathBuf,
+    /// The folder where the videos of the subscriptions should be downloaded.
+    #[arg(long, default_value = "downloads")]
+    subscriptions_download_folder: PathBuf,
+
+    /// The folder where direct download media should be downloaded.
+    #[arg(long, default_value = "downloads")]
+    direct_download_folder: PathBuf,
 }
 
 #[derive(Deserialize)]
@@ -76,7 +80,8 @@ struct SubscribeURL {
 struct AppState {
     env: heed::Env,
     subscriptions: Database<Str, SerdeJson<ChannelSubscription>>,
-    download_media: crossbeam_channel::Sender<Url>,
+    download_media: crossbeam_channel::Sender<(Url, PathBuf)>,
+    direct_download_folder: PathBuf,
     progress: broadcast::Sender<String>,
 }
 
@@ -84,7 +89,8 @@ struct AppState {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let Args { listen, database_folder, download_folder } = Args::parse();
+    let Args { listen, database_folder, subscriptions_download_folder, direct_download_folder } =
+        Args::parse();
     let (download_media_sender, download_media_receiver) = bounded(10);
 
     let database_path = database_folder.join(".yt-dlp-server.db");
@@ -99,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         env: env.clone(),
         subscriptions,
         download_media: download_media_sender.clone(),
+        direct_download_folder,
         progress: broadcast::channel(100).0,
     });
 
@@ -114,8 +121,10 @@ async fn main() -> anyhow::Result<()> {
     thread::spawn(move || {
         let env = env.clone();
         let download_media = download_media_sender.clone();
+        let download_folder = subscriptions_download_folder.clone();
         loop {
-            if let Err(e) = fetch_new_medium(&env, subscriptions, &download_media) {
+            if let Err(e) = fetch_new_medium(&env, subscriptions, &download_media, &download_folder)
+            {
                 error!("Failed fetching new medium: {e}");
             }
 
@@ -127,9 +136,8 @@ async fn main() -> anyhow::Result<()> {
     let progress = app_state.progress.clone();
     task::spawn_blocking(move || {
         let progress = progress.clone();
-        for url in download_media_receiver {
+        for (url, download_folder) in download_media_receiver {
             let progress = progress.clone();
-            let download_folder = download_folder.clone();
             task::spawn(
                 async move { download_url_with_ytdlp(url, progress, download_folder).await },
             );
@@ -166,7 +174,7 @@ async fn download_url(
     Query(DownloadURL { url }): Query<DownloadURL>,
 ) -> Redirect {
     let url = Url::parse(&url).unwrap();
-    state.download_media.send(url).unwrap();
+    state.download_media.send((url, state.direct_download_folder.to_owned())).unwrap();
     Redirect::temporary("/")
 }
 
@@ -461,7 +469,8 @@ fn fetch_feed_title(channel_id: &ChannelId) -> anyhow::Result<Option<String>> {
 fn fetch_new_medium(
     env: &heed::Env,
     subscriptions: Database<Str, SerdeJson<ChannelSubscription>>,
-    download_media: &crossbeam_channel::Sender<Url>,
+    download_media: &crossbeam_channel::Sender<(Url, PathBuf)>,
+    download_folder: &Path,
 ) -> anyhow::Result<()> {
     // Pull the list of feeds to fetch and fetch the videos
     // that were published betwnee now and the last pull we did.
@@ -473,7 +482,7 @@ fn fetch_new_medium(
         let entries = fetch_filtered_feed(channel_id, restrict)?;
         for (url, published) in entries {
             if published > last_pull {
-                if let Err(e) = download_media.send(url) {
+                if let Err(e) = download_media.send((url, download_folder.to_owned())) {
                     error!("while sending in the channel: {e}");
                 }
             }
