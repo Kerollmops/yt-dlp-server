@@ -506,7 +506,10 @@ fn fetch_new_medium(
     while let Some(result) = iter.next() {
         let (key, mut sub) = result.context("decoding mutable subsbcription entry")?;
         sub.last_pull = now;
-        unsafe { iter.put_current(key, &sub).context("in-place writing subscription entry")? };
+        unsafe {
+            iter.put_current(&key.to_string(), &sub)
+                .context("in-place writing subscription entry")?
+        };
     }
     drop(iter);
     wtxn.commit().context("committing subscription modifications")?;
