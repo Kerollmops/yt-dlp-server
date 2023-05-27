@@ -14,7 +14,7 @@ cargo install --path .
 Customize the `$USER` variable of the _launched.yt-dlp-server.plist_ file then load it.
 
 ```sh
-launchctl load launched.yt-dlp-server.plist
+launchctl load -w launched.yt-dlp-server.plist
 launchctl list | grep yt-dlp-server
 launchctl start launched.yt-dlp-server
 ```
