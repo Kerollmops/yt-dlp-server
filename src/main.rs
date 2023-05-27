@@ -115,7 +115,7 @@ async fn main() -> anyhow::Result<()> {
             let version = version.lines().next().unwrap();
             debug!("Running the server with `yt-dlp` version {version}");
         }
-        Err(e) => bail!("While running `yt-dlp --version`: {e}"),
+        Err(e) => bail!("While running `yt-dlp --version`: {e:?}"),
     };
 
     thread::spawn(move || {
@@ -125,7 +125,7 @@ async fn main() -> anyhow::Result<()> {
         loop {
             if let Err(e) = fetch_new_medium(&env, subscriptions, &download_media, &download_folder)
             {
-                error!("Failed fetching new medium: {e}");
+                error!("Failed fetching new medium: {e:?}");
             }
 
             thread::sleep(Duration::from_secs(30 * 60)); // 30 minutes
@@ -432,15 +432,24 @@ fn fetch_filtered_feed(
     let client = reqwest::blocking::ClientBuilder::new()
         .cookie_store(true)
         .redirect(redirect::Policy::limited(10))
-        .build()?;
+        .build()
+        .context("building reqwest client")?;
 
     let url = format!("https://www.youtube.com/feeds/videos.xml?channel_id={channel_id}");
-    let xml = client.get(url).send()?.bytes()?;
+    let xml = client
+        .get(url)
+        .send()
+        .context("sending get reqwest")?
+        .bytes()
+        .context("downloading request bytes")?;
 
     // Make the regex case-insensitive
-    let restrict = RegexBuilder::new(restrict.as_str()).case_insensitive(true).build()?;
+    let restrict = RegexBuilder::new(restrict.as_str())
+        .case_insensitive(true)
+        .build()
+        .context("building regex")?;
 
-    let feed = feed_rs::parser::parse(&xml[..])?;
+    let feed = feed_rs::parser::parse(&xml[..]).context("creating feed parser")?;
     let mut urls_published = Vec::new();
     for entry in feed.entries {
         if let Some(title) = entry.title.map(|t| t.content) {
@@ -474,31 +483,33 @@ fn fetch_new_medium(
 ) -> anyhow::Result<()> {
     // Pull the list of feeds to fetch and fetch the videos
     // that were published betwnee now and the last pull we did.
-    let rtxn = env.read_txn()?;
+    let rtxn = env.read_txn().context("opening read txn")?;
     let now = chrono::Utc::now();
-    for result in subscriptions.iter(&rtxn)? {
-        let (_key, sub) = result?;
+    for result in subscriptions.iter(&rtxn).context("creating subscription iterator")? {
+        let (_key, sub) = result.context("decoding subscription entry")?;
         let ChannelSubscription { channel_id, last_pull, restrict, .. } = sub;
-        let entries = fetch_filtered_feed(channel_id, restrict)?;
+        let entries =
+            fetch_filtered_feed(channel_id, restrict).context("fetching filtered feed")?;
         for (url, published) in entries {
             if published > last_pull {
                 if let Err(e) = download_media.send((url, download_folder.to_owned())) {
-                    error!("while sending in the channel: {e}");
+                    error!("while sending in the channel: {e:?}");
                 }
             }
         }
     }
 
     // Mark all of our subscriptions as recently-pulled
-    let mut wtxn = env.write_txn()?;
-    let mut iter = subscriptions.iter_mut(&mut wtxn)?;
+    let mut wtxn = env.write_txn().context("opening write txn")?;
+    let mut iter =
+        subscriptions.iter_mut(&mut wtxn).context("creating subscrition write iterator")?;
     while let Some(result) = iter.next() {
-        let (key, mut sub) = result?;
+        let (key, mut sub) = result.context("decoding mutable subsbcription entry")?;
         sub.last_pull = now;
-        unsafe { iter.put_current(key, &sub)? };
+        unsafe { iter.put_current(key, &sub).context("in-place writing subscription entry")? };
     }
     drop(iter);
-    wtxn.commit()?;
+    wtxn.commit().context("committing subscription modifications")?;
 
     Ok(())
 }
