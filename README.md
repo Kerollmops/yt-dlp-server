@@ -1,6 +1,12 @@
 # yt-dlp-server
 A small server that can download any media by using yt-dlp
 
+
+<p align="center">
+<img align="left" width="45%" alt="The ongoing downloads" src="/screenshots/ongoing-downloads.PNG">
+<img align="right" width="45%" alt="The list of subscriptions" src="/screenshots/subscriptions.PNG">
+</p>
+
 ## Installation
 
 Install the crate global to make it available to the current user.
