@@ -507,8 +507,8 @@ fn fetch_new_medium(
         let (key, mut sub) = result.context("decoding mutable subsbcription entry")?;
         sub.last_pull = now;
         unsafe {
-            iter.put_current(&key.to_string(), &sub)
-                .context("in-place writing subscription entry")?
+            let key = key.to_string();
+            iter.put_current(&key, &sub).context("in-place writing subscription entry")?
         };
     }
     drop(iter);

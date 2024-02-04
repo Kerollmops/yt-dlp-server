@@ -13,7 +13,7 @@ clap = { version = "4.0.29", features = ["derive"] }
 crossbeam-channel = "0.5.8"
 feed-rs = "1.3"
 futures = "0.3.25"
-heed = "0.20.0-alpha.0"
+heed = "0.20.0-alpha.9"
 humantime = "2.1.0"
 mime = "0.3.16"
 once_cell = "1.17.0"
