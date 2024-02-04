@@ -383,6 +383,7 @@ async fn download_url_with_ytdlp(
     let stdout = cmd.stdout.as_mut().unwrap();
     let stdout_reader = BufReader::new(stdout);
     let mut stdout_lines = stdout_reader.lines();
+    let mut previous_percentage = 0;
     while let Some(line) = stdout_lines.next_line().await? {
         trace!("progress line {line:?}");
         if let Some(captures) = PROGRESS_REGEX.captures(&line) {
@@ -411,7 +412,10 @@ async fn download_url_with_ytdlp(
             let _ = progress.send(content.to_string());
 
             let percentage = percentage as u8;
-            if matches!(percentage, 10 | 25 | 50 | 75 | 90 | 95 | 99 | 100) {
+            if percentage != previous_percentage
+                && matches!(percentage, 10 | 25 | 50 | 75 | 90 | 95 | 99 | 100)
+            {
+                previous_percentage = percentage;
                 let message = if percentage >= 100 {
                     "Downloaded and available on the Apple TV".to_owned()
                 } else {
