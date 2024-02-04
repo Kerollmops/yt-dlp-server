@@ -413,14 +413,9 @@ async fn download_url_with_ytdlp(
             let _ = progress.send(content.to_string());
 
             let percentage = percentage as u8;
-            if percentage != previous_percentage && matches!(percentage, 50 | 75 | 100) {
+            if percentage != previous_percentage && percentage == 10 {
                 previous_percentage = percentage;
-                let message = if percentage >= 100 {
-                    "Downloaded and available on the Apple TV".to_owned()
-                } else {
-                    format!("Downloaded at {percentage}%...")
-                };
-                if let Err(e) = send_pushover_notification(&filename, &message) {
+                if let Err(e) = send_pushover_notification(&filename, "Download started...") {
                     error!("{e}");
                 }
             }
