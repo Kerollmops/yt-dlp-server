@@ -415,7 +415,7 @@ async fn download_url_with_ytdlp(
             let percentage = percentage as u8;
             if percentage != previous_percentage && percentage == 10 {
                 previous_percentage = percentage;
-                if let Err(e) = send_pushover_notification(&filename, "Download started...") {
+                if let Err(e) = send_pushover_notification(&filename, "Download started...", &url) {
                     error!("{e}");
                 }
             }
@@ -431,7 +431,8 @@ async fn download_url_with_ytdlp(
         Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
         _ => {
             info!("Finished downloaded {filename}");
-            if let Err(e) = send_pushover_notification(&filename, "Available on the Apple TV") {
+            if let Err(e) = send_pushover_notification(&filename, "Available on the Apple TV", &url)
+            {
                 error!("{e}");
             }
         }
@@ -440,7 +441,7 @@ async fn download_url_with_ytdlp(
     Ok(())
 }
 
-fn send_pushover_notification(title: &str, message: &str) -> anyhow::Result<bool> {
+fn send_pushover_notification(title: &str, message: &str, url: &Url) -> anyhow::Result<bool> {
     let pushover_app_token = match env::var("PUSHOVER_APP_TOKEN") {
         Ok(token) => token,
         Err(env::VarError::NotPresent) => return Ok(false),
@@ -459,6 +460,7 @@ fn send_pushover_notification(title: &str, message: &str) -> anyhow::Result<bool
             "user": pushover_user_key,
             "title": title,
             "message": message,
+            "url": url.as_str(),
         }))
         .context("sending a request to the pushover API")?;
 
