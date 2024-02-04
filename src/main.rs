@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::{fs, include_str as include, thread, vec};
+use std::{env, fs, include_str as include, thread, vec};
 
 use anyhow::{bail, Context};
 use askama::Template;
@@ -401,13 +401,26 @@ async fn download_url_with_ytdlp(
                     String::from("N/A")
                 }
             };
+            let percentage = (prg.current as f32) / (prg.total as f32) * 100.0;
             let content = json!({
                 "filename": filename,
                 "url": url.as_str(),
-                "percentage": (prg.current as f32) / (prg.total as f32) * 100.0,
+                "percentage": percentage,
                 "eta": prg.eta,
             });
             let _ = progress.send(content.to_string());
+
+            let percentage = percentage as u8;
+            if matches!(percentage, 10 | 25 | 50 | 75 | 90 | 95 | 99 | 100) {
+                let message = if percentage >= 100 {
+                    "Downloaded and available on the Apple TV".to_owned()
+                } else {
+                    format!("Downloaded at {percentage}%...")
+                };
+                if let Err(e) = send_pushover_notification(&filename, &message) {
+                    error!("{e}");
+                }
+            }
         }
     }
 
@@ -418,10 +431,40 @@ async fn download_url_with_ytdlp(
             error!("There is an issue downloading {url:?}, status: {s}")
         }
         Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
-        _ => info!("Finished downloading {url}"),
+        _ => {
+            info!("Finished downloaded {url}");
+            if let Err(e) = send_pushover_notification(url.as_str(), "Available on the Apple TV") {
+                error!("{e}");
+            }
+        }
     }
 
     Ok(())
+}
+
+fn send_pushover_notification(title: &str, message: &str) -> anyhow::Result<bool> {
+    let pushover_app_token = match env::var("PUSHOVER_APP_TOKEN") {
+        Ok(token) => token,
+        Err(env::VarError::NotPresent) => return Ok(false),
+        otherwise => otherwise.context("while reading PUSHOVER_APP_TOKEN")?,
+    };
+
+    let pushover_user_key = match env::var("PUSHOVER_USER_KEY") {
+        Ok(user_key) => user_key,
+        Err(env::VarError::NotPresent) => return Ok(false),
+        otherwise => otherwise.context("while reading PUSHOVER_USER_KEY")?,
+    };
+
+    ureq::post("https://api.pushover.net/1/messages.json")
+        .send_json(json!({
+            "token": pushover_app_token,
+            "user": pushover_user_key,
+            "title": title,
+            "message": message,
+        }))
+        .context("sending a request to the pushover API")?;
+
+    Ok(true)
 }
 
 /// Fetches the channel name, the URLs and publish datetime of the given YouTube channel.
