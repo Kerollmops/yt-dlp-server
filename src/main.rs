@@ -384,6 +384,7 @@ async fn download_url_with_ytdlp(
     let stdout_reader = BufReader::new(stdout);
     let mut stdout_lines = stdout_reader.lines();
     let mut previous_percentage = 0;
+    let mut filename = url.to_string();
     while let Some(line) = stdout_lines.next_line().await? {
         trace!("progress line {line:?}");
         if let Some(captures) = PROGRESS_REGEX.captures(&line) {
@@ -395,7 +396,7 @@ async fn download_url_with_ytdlp(
                     DownloadProgress::default()
                 }
             };
-            let filename = match extract_clean_filename(prg.filename) {
+            filename = match extract_clean_filename(prg.filename) {
                 Ok(filename) => filename,
                 Err(e) => {
                     error!("can't extract clean filename: {e}");
@@ -412,9 +413,7 @@ async fn download_url_with_ytdlp(
             let _ = progress.send(content.to_string());
 
             let percentage = percentage as u8;
-            if percentage != previous_percentage
-                && matches!(percentage, 10 | 25 | 50 | 75 | 90 | 95 | 99 | 100)
-            {
+            if percentage != previous_percentage && matches!(percentage, 50 | 75 | 100) {
                 previous_percentage = percentage;
                 let message = if percentage >= 100 {
                     "Downloaded and available on the Apple TV".to_owned()
@@ -436,8 +435,8 @@ async fn download_url_with_ytdlp(
         }
         Err(err) => error!("There is an issue downloading {url:?}: {err:?}"),
         _ => {
-            info!("Finished downloaded {url}");
-            if let Err(e) = send_pushover_notification(url.as_str(), "Available on the Apple TV") {
+            info!("Finished downloaded {filename}");
+            if let Err(e) = send_pushover_notification(&filename, "Available on the Apple TV") {
                 error!("{e}");
             }
         }
