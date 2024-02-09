@@ -2,40 +2,38 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>Label</key>
-    <string>launched.yt-dlp-server</string>
-
-    <key>ProgramArguments</key>
-    <array>
-        <string>/Users/$USER/.cargo/bin/yt-dlp-server</string>
-        <string>--listen</string>
-        <string>0.0.0.0:8989</string>
-        <string>--database-folder</string>
-        <string>/Users/$USER/Movies/yt-dlp-server</string>
-        <string>--subscriptions-download-folder</string>
-        <string>/Users/$USER/Movies/yt-dlp-server/downloads</string>
-        <string>--direct-download-folder</string>
-        <string>/Users/$USER/Movies/yt-dlp-server/downloads</string>
-    </array>
-
-    <key>EnvironmentVariables</key>
-    <dict>
-           <key>RUST_LOG</key>
-           <string>debug</string>
-           <key>PATH</key>
-           <!-- python3, yt-dlp, ffmpeg and,; that's it -->
-           <string>/usr/bin:/usr/local/bin:/Users/$USER/.nix-profile/bin</string>
-    </dict>
-
-    <key>RunAtLoad</key>
-    <true/>
-
-    <key>KeepAlive</key>
-    <true/>
-
-    <key>StandardOutPath</key>
-    <string>/Users/$USER/Library/Logs/yt-dlp-server/yt-dlp-server.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/$USER/Library/Logs/yt-dlp-server/yt-dlp-server.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>/usr/bin:/usr/local/bin:/Users/$USER/homebrew/bin</string>
+		<key>PUSHOVER_APP_TOKEN</key>
+		<string>XXX</string>
+		<key>PUSHOVER_USER_KEY</key>
+		<string>XXX</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>yt-dlp-server</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/fdautil</string>
+		<string>exec</string>
+		<string>/Users/$USER/.cargo/bin/yt-dlp-server</string>
+		<string>--listen</string>
+		<string>0.0.0.0:8989</string>
+		<string>--database-folder</string>
+		<string>/Users/$USER/Public</string>
+		<string>--subscriptions-download-folder</string>
+		<string>/Users/$USER/Public/downloads</string>
+		<string>--direct-download-folder</string>
+		<string>/Users/$USER/Public/downloads</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/tmp/yt-dlp-server.err</string>
+	<key>StandardOutPath</key>
+	<string>/tmp/yt-dlp-server.out</string>
 </dict>
 </plist>
