@@ -95,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
 
     let database_path = database_folder.join(".yt-dlp-server.db");
     let _ = fs::create_dir_all(&database_path);
-    let env = EnvOpenOptions::new().open(&database_path)?;
+    let env = unsafe { EnvOpenOptions::new().open(&database_path)? };
     let mut wtxn = env.write_txn()?;
     let subscriptions: Database<Str, SerdeJson<ChannelSubscription>> =
         env.create_database(&mut wtxn, None)?;
