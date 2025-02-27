@@ -375,6 +375,7 @@ async fn download_url_with_ytdlp(
         .args(["--paths", &format!("temp:{}", std::env::temp_dir().display())])
         .args(["--paths", &download_folder.display().to_string()])
         .args(["--format", "bestvideo[height<2160]+bestaudio/best"])
+        .args(["--cookies", "/Users/clementrenault/Downloads/cookies.firefox-private.txt"])
         .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
         .args(["--", url.as_str()])
         .stdout(Stdio::piped())
