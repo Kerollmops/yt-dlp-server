@@ -16,6 +16,8 @@ cargo install --path .
 
 ## Running it on mac os
 
+Download the binary from the [yt-dlp releases](https://github.com/yt-dlp/yt-dlp/releases) page and place it in your PATH. The binary must be named `yt-dlp-macos`.
+
 Customize the `$USER` variable of the _launched.yt-dlp-server.plist_ file then load it.
 
 ```sh

@@ -109,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
         progress: broadcast::channel(100).0,
     });
 
-    match Command::new("yt-dlp").arg("--version").output().await {
+    match Command::new("yt-dlp-macos").arg("--version").output().await {
         Ok(output) => {
             let version = String::from_utf8(output.stdout).unwrap();
             let version = version.lines().next().unwrap();
@@ -371,7 +371,7 @@ async fn download_url_with_ytdlp(
         return Ok(());
     }
 
-    let mut cmd = Command::new("yt-dlp")
+    let mut cmd = Command::new("yt-dlp-macos")
         .args(["--paths", &format!("temp:{}", std::env::temp_dir().display())])
         .args(["--paths", &download_folder.display().to_string()])
         .args(["--format", "bestvideo[height<2160]+bestaudio/best"])
