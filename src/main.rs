@@ -31,6 +31,7 @@ use tokio::process::Command;
 use tokio::sync::broadcast;
 use tokio::task;
 use tracing::{debug, error, info, trace};
+use tracing_subscriber::EnvFilter;
 use url::Url;
 
 /// Do a simple `--progress-template '%(progress)j'` to see the JSON and the possibilities.
@@ -87,7 +88,7 @@ struct AppState {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().with_env_filter(EnvFilter::from_default_env()).init();
 
     let Args { listen, database_folder, subscriptions_download_folder, direct_download_folder } =
         Args::parse();
