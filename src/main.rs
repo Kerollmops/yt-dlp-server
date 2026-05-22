@@ -378,6 +378,7 @@ async fn download_url_with_ytdlp(
         .args(["--format", "bestvideo[height<2160]+bestaudio/best"])
         .args(["--cookies", "/Users/clementrenault/Downloads/cookies.firefox-private.txt"])
         .args(["--js-runtimes", "deno:/Users/clementrenault/.deno/bin/deno"])
+        .args(["--write-sub", "--write-auto-sub", "--sub-lang", "fr.*,en.*"])
         .args(["-q", "--progress", "--newline", "--progress-template", PROGRESS_TEMPLATE])
         .args(["--", url.as_str()])
         .stdout(Stdio::piped())
